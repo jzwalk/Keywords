@@ -5,7 +5,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * 自动为文章中出现的关键词添加链接
  * @package Keywords
  * @author 羽中
- * @version 1.0.3
+ * @version 1.0.5
  * @dependence 13.12.12-*
  * @link http://www.jzwalk.com/archives/net/keywords-for-typecho
  */
@@ -45,7 +45,7 @@ class Keywords_Plugin implements Typecho_Plugin_Interface
 		$keywords = new Typecho_Widget_Helper_Form_Element_Textarea('keywords',NULL,'',_t('关键词链接'),_t('以“关键词”|(英文半角分隔号)“链接”形式填写, 每行一组. 如：<br/>google|http://www.google.com'));
 		$keywords->input->setAttribute('style','width:345px;height:150px;');
 		$form->addInput($keywords);
-		$tagslink = new Typecho_Widget_Helper_Form_Element_Checkbox('tagslink',array('true'=>'自动替换'),NULL,_t('标签链接'),_t('文中若出现与本站标签相同的关键词则自动添加标签页链接'));
+		$tagslink = new Typecho_Widget_Helper_Form_Element_Checkbox('tagslink',array('1'=>'自动替换'),NULL,_t('标签链接'),_t('文中若出现与本站标签相同的关键词则自动添加标签页链接'));
 		$form->addInput($tagslink);
 		$limits = new Typecho_Widget_Helper_Form_Element_Text('limits',NULL,'1',_t('链接频率'),_t('文中有多个重复关键词或标签时可限制链接替换次数'));
 		$limits->input->setAttribute('style','width:50px');
@@ -79,19 +79,49 @@ class Keywords_Plugin implements Typecho_Plugin_Interface
 		$tagselect = $db->select()->from('table.metas')->where('type = ?','tag');
 		$tagdata = $db->fetchAll($tagselect,array($widget->widget('Widget_Abstract_Metas'),'filter'));
 
-		$wlsets = explode('\n',$settings->keywords);
+		//fix separator bug
+		$keywords = str_replace("\n","sep",$settings->keywords);
+		$kwsets = explode('sep',$keywords);
 
-		if (!empty($settings->keywords) && true == strchr($settings->keywords,'|')) {
-			foreach ($wlsets as $wlset) {
-				$wlarray = explode('|',$wlset);
-				$content = preg_replace('/(?!<[^>]*)('.$wlarray[0].')(?![^<]*>)/i','<a href="'.$wlarray[1].'" target="_blank" title="'.$wlarray[0].'">'.$wlarray[0].'</a>',$content,$limit);
+		$kwarray = array();
+		//解析出关键词数组
+		if (!empty($kwsets) && strpos($kwsets[0],'|') !== 0) {
+			foreach ($kwsets as $kwset) {
+				$kwarray[] = explode('|',$kwset);
 			}
 		}
 
+		//标签链接并入数组
 		if ($tagdata && $settings->tagslink) {
 			foreach ($tagdata as $tag) {
-				$content = preg_replace('/(?!<[^>]*)('.$tag['name'].')(?![^<]*>)/i','<a href="'.$tag['permalink'].'" target="_blank" title="'.$tag['name'].'">'.$tag['name'].'</a>',$content,$limit);
+				$tags[] = array($tag['name'],$tag['permalink']);
 			}
+			$kwarray = array_merge($kwarray,$tags);
+		}
+
+		//排序优先替换长词
+		function sortdesc($a,$b) {
+			return (strlen($a[0]) < strlen($b[0])) ? 1 : -1;
+		}
+		usort($kwarray,'sortdesc');
+		$tmpkwds = array();
+		foreach($kwarray as $i=>$row) {
+			list($kwd,$url) = $row;
+			for($j=$i+1;$j<count($kwarray);$j++) {
+				$subkwd = $kwarray[$j][0];
+				//包含短词则替换md5
+				if(strpos($kwd,$subkwd) !== false) {
+					$tmpkwd = '{'.md5($subkwd).'}';
+					$kwd = str_replace($subkwd,$tmpkwd,$kwd);
+					$tmpkwds[$tmpkwd] = $subkwd;
+				}
+			}
+			//不替换html内的词
+			$content = preg_replace('/(?!<[^>]*)('.$row[0].')(?![^<]*>)/i','<a href="'.$row[1].'" target="_blank" title="'.$kwd.'">'.$kwd.'</a>',$content,$limit);
+		}
+		//将短词md5替换回来
+		foreach($tmpkwds as $tmp=>$kwd) {
+			$content = str_replace($tmp,$kwd,$content);
 		}
 
 		return $content;
