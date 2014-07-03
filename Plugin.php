@@ -5,7 +5,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
  * 自动为文章中出现的关键词添加链接
  * @package Keywords
  * @author 羽中
- * @version 1.0.5
+ * @version 1.0.6
  * @dependence 13.12.12-*
  * @link http://www.jzwalk.com/archives/net/keywords-for-typecho
  */
@@ -81,12 +81,14 @@ class Keywords_Plugin implements Typecho_Plugin_Interface
 
 		//fix separator bug
 		$keywords = str_replace("\n","sep",$settings->keywords);
-		$kwsets = explode('sep',$keywords);
-
+		$kwsets = array_filter(explode('sep',$keywords));
 		$kwarray = array();
+		$tmpkwds = array();
+
 		//解析出关键词数组
-		if (!empty($kwsets) && strpos($kwsets[0],'|') !== 0) {
+		if ($keywords && strpos($keywords,'|') !== 0) {
 			foreach ($kwsets as $kwset) {
+				$kwset = trim($kwset);
 				$kwarray[] = explode('|',$kwset);
 			}
 		}
@@ -99,32 +101,47 @@ class Keywords_Plugin implements Typecho_Plugin_Interface
 			$kwarray = array_merge($kwarray,$tags);
 		}
 
-		//排序优先替换长词
-		function sortdesc($a,$b) {
-			return (strlen($a[0]) < strlen($b[0])) ? 1 : -1;
-		}
-		usort($kwarray,'sortdesc');
-		$tmpkwds = array();
-		foreach($kwarray as $i=>$row) {
-			list($kwd,$url) = $row;
-			for($j=$i+1;$j<count($kwarray);$j++) {
-				$subkwd = $kwarray[$j][0];
-				//包含短词则替换md5
-				if(strpos($kwd,$subkwd) !== false) {
-					$tmpkwd = '{'.md5($subkwd).'}';
-					$kwd = str_replace($subkwd,$tmpkwd,$kwd);
-					$tmpkwds[$tmpkwd] = $subkwd;
+		if ($kwarray) {
+
+			//排序优先替换长词
+			usort($kwarray,array(new Keywords_Plugin,'sortdesc'));
+
+			foreach($kwarray as $i=>$row) {
+				list($kwd,$url) = $row;
+				for($j=$i+1;$j<count($kwarray);$j++) {
+					$subkwd = $kwarray[$j][0];
+
+					//包含短词则替换md5
+					if(strpos($kwd,$subkwd) !== false) {
+						$tmpkwd = '{'.md5($subkwd).'}';
+						$kwd = str_replace($subkwd,$tmpkwd,$kwd);
+						$tmpkwds[$tmpkwd] = $subkwd;
+					}
 				}
+
+				//不替换html内的词
+				$content = preg_replace('/(?!<[^>]*)('.$row[0].')(?![^<]*>)/s','<a href="'.$row[1].'" target="_blank" title="'.$kwd.'">'.$kwd.'</a>',$content,$limit);
 			}
-			//不替换html内的词
-			$content = preg_replace('/(?!<[^>]*)('.$row[0].')(?![^<]*>)/i','<a href="'.$row[1].'" target="_blank" title="'.$kwd.'">'.$kwd.'</a>',$content,$limit);
-		}
-		//将短词md5替换回来
-		foreach($tmpkwds as $tmp=>$kwd) {
-			$content = str_replace($tmp,$kwd,$content);
+
+			//将短词md5替换回来
+			foreach($tmpkwds as $tmp=>$kwd) {
+				$content = str_replace($tmp,$kwd,$content);
+			}
 		}
 
 		return $content;
+	}
+
+	/**
+	 * 按关键词长短排序
+	 * 
+	 * @access public
+	 * @param array $a,$b
+	 * @return integer
+	 */
+	public static function sortdesc($a,$b)
+	{
+		return (strlen($a[0]) < strlen($b[0])) ? 1 : -1;
 	}
 
 }
